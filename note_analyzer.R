@@ -7,54 +7,75 @@ library('caret')
 library('kknn')
 library('class')
 
-find_peaks <- function(data, fund_freq, freqs, npeaks) {
-    if (npeaks == 0) {
-        return(c())
+main <- function() {
+    files <- read.table('data.txt')
+    data <- process_data(files)
+
+    samp_size <- floor(.8 * nrow(data))
+    set.seed(123)
+    train_ind <- sample(seq_len(nrow(data)), size=samp_size)
+
+    train_data <- data[train_ind, 1:6]
+    test_data <- data[-train_ind, 1:6]
+    train_label <- data[train_ind, 7]
+    test_label <- data[-train_ind, 7]
+
+    print(typeof(train_label))
+    print(typeof(train_data))
+
+    train_pred <- knn.cv(train = train_data, cl = train_label)
+    print(train_pred)
+    print(train_label)
+
+    acc <- c()
+
+    for (i in 1:length(train_pred)) {
+        acc <- c(acc, train_pred[i] == train_label[i])
     }
 
-    peaks <- c()
-    harmonic <- 1
+    print(acc)
 
-    for (i in 1:npeaks) {
-        freq <- fund_freq * harmonic
-        index <- get_closest(freq, freqs)
-        peaks <- c(index, peaks)
-
-        harmonic <- harmonic + 1
-    }
-
-    return(peaks)
+    print("done")
 }
 
-get_subset <- function(data, indices) {
-    ret <- c()
+process_data <- function(files) {
+    # Data setup
+    f1 <- c()
+    f2 <- c()
+    f3 <- c()
+    f4 <- c()
+    f5 <- c()
+    fund_freqs <- c()
+    instr <- c()
 
-    for (i in 1:length(indices)) {
-        index <- indices[i]
-        ret <- c(c(data[index]), ret)
-    }
+    for (i in 1:(sum(complete.cases(files)) - 1)) {
+        in_directory <- files[[i, 4]]
+        note <- files[[i,3]]
+        octave <- files[[i,2]]
+        this_instr <- files[[i,1]]
 
-    return(ret)
-}
+        file <- paste("data/", in_directory, sep="")
+        feats <- calc_feats(file)
 
-note_from_freq <- function(note, octave) {
-    table <- read.table("note_freqs.txt")
-    freq <- 16.35
+        f1 <- c(f1, feats[1])
+        f2 <- c(f2, feats[2])
+        f3 <- c(f3, feats[3])
+        f4 <- c(f4, feats[4])
+        f5 <- c(f5, feats[5])
+        fund_freqs <- c(fund_freqs, feats[6])
+        instr <- c(instr, this_instr)
 
-    note <- as.character(note)
-    octave <- as.character(octave)
-
-    for (i in 1:(sum(complete.cases(table)) - 1)) {
-        this_note <- table[[i, 1]]
-        this_octave <- table[[i, 2]]
-
-        if (note == this_note && octave == this_octave) {
-            freq <- table[[i,3]]
+        if (i %% 20 == 0) {
+            print(i)
+        }
+        if (i == 10) {
             break
         }
     }
 
-    return(freq)
+    data <- data.frame(f1, f2, f3, f4, f5, fund_freqs, instr)
+
+    return(data)    
 }
 
 calc_feats <- function(file) {
@@ -99,6 +120,56 @@ calc_feats <- function(file) {
     return(list(f1, f2, f3, f4, f5, fund_freq))
 }
 
+find_peaks <- function(data, fund_freq, freqs, npeaks) {
+    if (npeaks == 0) {
+        return(c())
+    }
+
+    peaks <- c()
+    harmonic <- 1
+
+    for (i in 1:npeaks) {
+        freq <- fund_freq * harmonic
+        index <- get_closest(freq, freqs)
+        peaks <- c(index, peaks)
+
+        harmonic <- harmonic + 1
+    }
+
+    return(peaks)
+}
+
+note_from_freq <- function(note, octave) {
+    table <- read.table("note_freqs.txt")
+    freq <- 16.35
+
+    note <- as.character(note)
+    octave <- as.character(octave)
+
+    for (i in 1:(sum(complete.cases(table)) - 1)) {
+        this_note <- table[[i, 1]]
+        this_octave <- table[[i, 2]]
+
+        if (note == this_note && octave == this_octave) {
+            freq <- table[[i,3]]
+            break
+        }
+    }
+
+    return(freq)
+}
+
+get_subset <- function(data, indices) {
+    ret <- c()
+
+    for (i in 1:length(indices)) {
+        index <- indices[i]
+        ret <- c(c(data[index]), ret)
+    }
+
+    return(ret)
+}
+
 get_closest <- function(element, lst) {
     close_dist <- abs(element - lst[1])
     close_index <- 1
@@ -113,77 +184,6 @@ get_closest <- function(element, lst) {
     }
 
     return(close_index)
-}
-
-process_data <- function(files) {
-    # Data setup
-    f1 <- c()
-    f2 <- c()
-    f3 <- c()
-    f4 <- c()
-    f5 <- c()
-    fund_freqs <- c()
-    instr <- c()
-
-    for (i in 1:(sum(complete.cases(files)) - 1)) {
-        in_directory <- files[[i, 4]]
-        note <- files[[i,3]]
-        octave <- files[[i,2]]
-        this_instr <- files[[i,1]]
-
-        file <- paste("data/", in_directory, sep="")
-        feats <- calc_feats(file)
-
-        f1 <- c(f1, feats[1])
-        f2 <- c(f2, feats[2])
-        f3 <- c(f3, feats[3])
-        f4 <- c(f4, feats[4])
-        f5 <- c(f5, feats[5])
-        fund_freqs <- c(fund_freqs, feats[6])
-        instr <- c(instr, this_instr)
-
-        if (i %% 20 == 0) {
-            print(i)
-        }
-        if (i == 10) {
-            break
-        }
-    }
-
-    data <- data.frame(f1, f2, f3, f4, f5, fund_freqs, instr)
-
-    return(data)    
-}
-
-main <- function() {
-    files <- read.table('data.txt')
-    data <- process_data(files)
-
-    samp_size <- floor(.8 * nrow(data))
-    set.seed(123)
-    train_ind <- sample(seq_len(nrow(data)), size=samp_size)
-
-    train_data <- data[train_ind, 1:6]
-    test_data <- data[-train_ind, 1:6]
-    train_label <- data[train_ind, 7]
-    test_label <- data[-train_ind, 7]
-
-    print(typeof(train_label))
-    print(typeof(train_data))
-
-    train_pred <- knn.cv(train = train_data, cl = train_label)
-    print(train_pred)
-    print(train_label)
-
-    acc <- c()
-
-    for (i in 1:length(train_pred)) {
-        acc <- c(acc, train_pred[i] == train_label[i])
-    }
-
-    print(acc)
-
-    print("done")
 }
 
 main()
