@@ -6,36 +6,71 @@ library('ProjectTemplate')
 library('caret')
 library('kknn')
 library('class')
+library('neuralnet')
+library('base')
 
 main <- function() {
     files <- read.table('data.txt')
     data <- process_data(files)
 
+    stddev = sapply(data, sd)
+    data$f1 <- scale(data$f1, center = TRUE, scale = stddev[1])
+    data$f2 <- scale(data$f2, center = TRUE, scale = stddev[2])
+    data$f3 <- scale(data$f3, center = TRUE, scale = stddev[3])
+    data$f4 <- scale(data$f4, center = TRUE, scale = stddev[4])
+    data$f5 <- scale(data$f5, center = TRUE, scale = stddev[5])
+    data$fund_freqs <- scale(data$fund_freqs, center = TRUE, scale = stddev[6])
+
     samp_size <- floor(.8 * nrow(data))
     set.seed(123)
     train_ind <- sample(seq_len(nrow(data)), size=samp_size)
 
-    train_data <- data[train_ind, 1:6]
     test_data <- data[-train_ind, 1:6]
-    train_label <- data[train_ind, 7]
     test_label <- data[-train_ind, 7]
+    test <- data[-train_ind, ]
 
-    print(typeof(train_label))
-    print(typeof(train_data))
+    train_partition <- data[train_ind, ]
 
-    train_pred <- knn.cv(train = train_data, cl = train_label)
-    print(train_pred)
-    print(train_label)
+    samp_size <- floor(.8 * nrow(train_partition))
+    train_ind <- sample(seq_len(nrow(train_partition)), size=samp_size)
+
+    train_data <- train_partition[train_ind, 1:6]
+    valid_data <- train_partition[-train_ind, 1:6]
+    train_label <- train_partition[train_ind, 7]
+    valid_label <- train_partition[-train_ind, 7]
+
+    train <- train_partition[train_ind, ]
+    valid <- train_partition[-train_ind, ]
+
+    knn_acc <- knn_pred(train_data, train_label)
+    net_acc <- net_pred(train, valid_data, valid_label)
+
+    print("done")
+}
+
+knn_pred <- function(train_data, train_label) {
+    train_pred <- knn.cv(train_data, train_label)
 
     acc <- c()
-
+    
     for (i in 1:length(train_pred)) {
         acc <- c(acc, train_pred[i] == train_label[i])
     }
 
-    print(acc)
+    return(acc)
+}
 
-    print("done")
+net_pred <- function(train, valid_data, valid_label) {
+    net <- neuralnet(instr~f1+f2+f3+f4+f5+fund_freqs, train, hidden=10)
+    valid_pred = compute(net, valid_data)$net.result
+
+    acc <- c()
+
+    for (i in 1:length(valid_pred)) {
+        acc <- c(acc, round(valid_pred[i]) == valid_label[i])
+    }
+
+    return(acc)
 }
 
 process_data <- function(files) {
@@ -68,7 +103,7 @@ process_data <- function(files) {
         if (i %% 20 == 0) {
             print(i)
         }
-        if (i == 10) {
+        if (i == 2000) {
             break
         }
     }
