@@ -8,69 +8,73 @@ library('kknn')
 library('class')
 library('neuralnet')
 library('base')
+library('e1071')
+library('pROC')
 
-main <- function() {
-    files <- read.table('data.txt')
-    data <- process_data(files)
-
-    stddev = sapply(data, sd)
-    data$f1 <- scale(data$f1, center = TRUE, scale = stddev[1])
-    data$f2 <- scale(data$f2, center = TRUE, scale = stddev[2])
-    data$f3 <- scale(data$f3, center = TRUE, scale = stddev[3])
-    data$f4 <- scale(data$f4, center = TRUE, scale = stddev[4])
-    data$f5 <- scale(data$f5, center = TRUE, scale = stddev[5])
-    data$fund_freqs <- scale(data$fund_freqs, center = TRUE, scale = stddev[6])
-
-    samp_size <- floor(.8 * nrow(data))
-    set.seed(123)
-    train_ind <- sample(seq_len(nrow(data)), size=samp_size)
-
-    test_data <- data[-train_ind, 1:6]
-    test_label <- data[-train_ind, 7]
-    test <- data[-train_ind, ]
-
-    train_partition <- data[train_ind, ]
-
-    samp_size <- floor(.8 * nrow(train_partition))
-    train_ind <- sample(seq_len(nrow(train_partition)), size=samp_size)
-
-    train_data <- train_partition[train_ind, 1:6]
-    valid_data <- train_partition[-train_ind, 1:6]
-    train_label <- train_partition[train_ind, 7]
-    valid_label <- train_partition[-train_ind, 7]
-
-    train <- train_partition[train_ind, ]
-    valid <- train_partition[-train_ind, ]
-
-    knn_acc <- knn_pred(train_data, train_label)
-    net_acc <- net_pred(train, valid_data, valid_label)
-
-    print("done")
-}
-
-knn_pred <- function(train_data, train_label) {
-    train_pred <- knn.cv(train_data, train_label)
+knn_predict <- function(train, valid) {
+    train_pred <- knn(train[, 1:5], valid[, 1:5], train[, 6], k=11)
 
     acc <- c()
-    
+
     for (i in 1:length(train_pred)) {
-        acc <- c(acc, train_pred[i] == train_label[i])
+        acc <- c(acc, train_pred[i] == valid[i, 6])
     }
 
-    return(acc)
+    return(c(acc, train_pred))
 }
 
-net_pred <- function(train, valid_data, valid_label) {
-    net <- neuralnet(instr~f1+f2+f3+f4+f5+fund_freqs, train, hidden=10)
-    valid_pred = compute(net, valid_data)$net.result
+find_k <- function(train, valid) {
+    k <- c()
+    knn_accs <- c()
+
+    for (i in 1:49) {
+        k <- c(k, i)
+        train_pred <- knn(train[, 1:5], valid[, 1:5], train[, 6], k=i)
+        knn_acc <- c()
+
+        for (j in 1:length(train_pred)) {
+            knn_acc <- c(knn_acc, train_pred[j] == (valid[, 6])[j])
+        }
+
+        knn_accs <- c(knn_accs, 1 - sum(knn_acc) / length(train_pred))
+    }
+
+    return(c(k, knn_accs))
+}
+
+net_predict <- function(train, valid) {
+    net <- neuralnet(instr~r1+r2+r3+r4+fund_freqs, train, hidden=0)
+    valid_pred <- compute(net, valid[, 1:5])$net.result
 
     acc <- c()
 
     for (i in 1:length(valid_pred)) {
-        acc <- c(acc, round(valid_pred[i]) == valid_label[i])
+        acc <- c(acc, round(valid_pred[i]) == valid[i, 6])
     }
 
-    return(acc)
+    return(c(acc, valid_pred))
+}
+
+bayes_predict <- function(train, valid) {
+    net <- naiveBayes(as.factor(instr)~., data=train)
+    valid_pred <- predict(net, valid[, 1:5])
+
+    acc <- c()
+
+    for (i in 1:length(valid_pred)) {
+        acc <- c(acc, valid_pred[i] == valid[i, 6])
+    }
+
+    return(c(acc, valid_pred))
+}
+
+set_feats_to_ratios <- function(data) {
+    data$f2 <- scale(data$f2/data$f1, center = FALSE, scale = stddev[1]) 
+    data$f3 <- scale(data$f3/data$f1, center = FALSE, scale = stddev[1]) 
+    data$f4 <- scale(data$f4/data$f1, center = FALSE, scale = stddev[1]) 
+    data$f5 <- scale(data$f5/data$f1, center = FALSE, scale = stddev[1]) 
+
+    return(data)
 }
 
 process_data <- function(files) {
@@ -90,15 +94,15 @@ process_data <- function(files) {
         this_instr <- files[[i,1]]
 
         file <- paste("data/", in_directory, sep="")
-        feats <- calc_feats(file)
+        feats <- calc_feats(file, note, octave)
 
-        f1 <- c(f1, feats[1])
-        f2 <- c(f2, feats[2])
-        f3 <- c(f3, feats[3])
-        f4 <- c(f4, feats[4])
-        f5 <- c(f5, feats[5])
-        fund_freqs <- c(fund_freqs, feats[6])
-        instr <- c(instr, this_instr)
+        f1[i] <- feats[1]
+        f2[i] <- feats[2]
+        f3[i] <- feats[3]
+        f4[i] <- feats[4]
+        f5[i] <- feats[5]
+        fund_freqs[i] <- feats[6]
+        instr[i] <- this_instr
 
         if (i %% 20 == 0) {
             print(i)
@@ -107,13 +111,17 @@ process_data <- function(files) {
             break
         }
     }
+    r1 <- f2/f1
+    r2 <- f3/f1
+    r3 <- f4/f1
+    r4 <- f5/f1
 
-    data <- data.frame(f1, f2, f3, f4, f5, fund_freqs, instr)
+    data <- data.frame(r1, r2, r3, r4, fund_freqs, instr)
 
     return(data)    
 }
 
-calc_feats <- function(file) {
+calc_feats <- function(file, note, octave) {
     wave <- readMP3(file)
 
     5292 / wave@samp.rate
@@ -146,13 +154,15 @@ calc_feats <- function(file) {
     fund_freq <- note_from_freq(note, octave)
     peaks <- find_peaks(powers, fund_freq, freqArray, 5)
 
-    f1 <- powers[peaks[1]]
-    f2 <- powers[peaks[2]]
-    f3 <- powers[peaks[3]]
-    f4 <- powers[peaks[4]]
-    f5 <- powers[peaks[5]]
+    #f1 <- powers[peaks[1]]
+    #f2 <- powers[peaks[2]]
+    #f3 <- powers[peaks[3]]
+    #f4 <- powers[peaks[4]]
+    #f5 <- powers[peaks[5]]
+    #ret <- list(f1, f2, f3, f4, f5, fund_freq)
+    #print(append(peaks, fund_freq))
 
-    return(list(f1, f2, f3, f4, f5, fund_freq))
+    return(append(peaks, fund_freq))
 }
 
 find_peaks <- function(data, fund_freq, freqs, npeaks) {
@@ -221,5 +231,33 @@ get_closest <- function(element, lst) {
     return(close_index)
 }
 
-main()
+files <- read.table('data.txt')
+data <- process_data(files)
+
+data[, 1:5] <- scale(data[, 1:5])
+
+samp_size <- floor(.8 * nrow(data))
+set.seed(123)
+train_ind <- sample(seq_len(nrow(data)), size=samp_size)
+
+test <- data[-train_ind, ]
+train_partition <- data[train_ind, ]
+
+samp_size <- floor(.8 * nrow(train_partition))
+train_ind <- sample(seq_len(nrow(train_partition)), size=samp_size)
+
+train <- train_partition[train_ind, ]
+valid <- train_partition[-train_ind, ]
+
+ret1 <- knn_predict(train, valid)
+knn_acc <- ret1[1]
+knn_pred <- ret1[2]
+
+ret2 <- net_predict(train, valid)
+net_acc <- ret2[1]
+net_pred <- ret2[2]
+
+ret3 <- bayes_predict(train, valid)
+bayes_acc <- ret3[1]
+bayes_pred <- ret3[2]
 
